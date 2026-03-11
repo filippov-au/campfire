@@ -11,14 +11,14 @@ class Opengraph::FetchTest < ActiveSupport::TestCase
     WebMock.stub_request(:get, "https://www.example.com/")
       .to_return(status: 200, body: "<body>ok<body>", headers: { content_type: "text/html" })
 
-    assert_equal "<body>ok<body>", @fetch.fetch_document(@url)
+    assert_equal "<body>ok<body>", @fetch.fetch_document(@url, ip: "1.2.3.4")
   end
 
   test "#fetch_document discards other content types" do
     WebMock.stub_request(:get, "https://www.example.com/")
       .to_return(status: 200, body: "I'm not HTML!", headers: { content_type: "text/plain" })
 
-    assert_nil @fetch.fetch_document(@url)
+    assert_nil @fetch.fetch_document(@url, ip: "1.2.3.4")
   end
 
   test "#fetch_document follows redirects" do
@@ -28,7 +28,9 @@ class Opengraph::FetchTest < ActiveSupport::TestCase
     WebMock.stub_request(:get, "https://www.other.com/")
       .to_return(status: 200, body: "<body>ok<body>", headers: { content_type: "text/html" })
 
-    assert_equal "<body>ok<body>", @fetch.fetch_document(@url)
+    RestrictedHTTP::PrivateNetworkGuard.stubs(:resolve).with("www.other.com").returns("1.2.3.4")
+
+    assert_equal "<body>ok<body>", @fetch.fetch_document(@url, ip: "1.2.3.4")
   end
 
   test "#fetch_document does not follow redirects to private networks" do
@@ -49,8 +51,8 @@ class Opengraph::FetchTest < ActiveSupport::TestCase
     # to a resolved IP, not a hostname to re-resolve.
     WebMock.disable_net_connect! allow: [ @url.host ]
     Resolv.stubs(:getaddress).with(@url.host).returns("1.2.3.4", "127.0.0.1")
-    TCPSocket.expects(:open).with(@url.host, 443, nil, nil).never
-    TCPSocket.expects(:open).with("1.2.3.4", 443, nil, nil).throws(:dns_not_rebound)
+    TCPSocket.expects(:open).with(@url.host, 443, nil, nil, open_timeout: 60).never
+    TCPSocket.expects(:open).with("1.2.3.4", 443, nil, nil, open_timeout: 60).throws(:dns_not_rebound)
 
     assert_throws :dns_not_rebound do
       @fetch.fetch_document(@url)
@@ -66,8 +68,8 @@ class Opengraph::FetchTest < ActiveSupport::TestCase
     # to a resolved IP, not a hostname to re-resolve.
     WebMock.disable_net_connect! allow: [ @url.host ]
     Resolv.stubs(:getaddress).with(@url.host).returns("1.2.3.4", "127.0.0.1")
-    TCPSocket.expects(:open).with(@url.host, 443, nil, nil).never
-    TCPSocket.expects(:open).with("1.2.3.4", 443, nil, nil).throws(:dns_not_rebound)
+    TCPSocket.expects(:open).with(@url.host, 443, nil, nil, open_timeout: 60).never
+    TCPSocket.expects(:open).with("1.2.3.4", 443, nil, nil, open_timeout: 60).throws(:dns_not_rebound)
 
     assert_throws :dns_not_rebound do
       @fetch.fetch_document(URI.parse("https://www.other.com/"), ip: "1.2.3.4")
@@ -78,8 +80,10 @@ class Opengraph::FetchTest < ActiveSupport::TestCase
     WebMock.stub_request(:get, "https://www.example.com/")
       .to_return(status: 302, headers: { location: "https://www.example.com/" })
 
+    RestrictedHTTP::PrivateNetworkGuard.stubs(:resolve).with(@url.host).returns("1.2.3.4")
+
     assert_raises Opengraph::Fetch::TooManyRedirectsError do
-      @fetch.fetch_document(@url)
+      @fetch.fetch_document(@url, ip: "1.2.3.4")
     end
   end
 
@@ -87,28 +91,28 @@ class Opengraph::FetchTest < ActiveSupport::TestCase
     WebMock.stub_request(:get, "https://www.example.com/")
       .to_return(status: 200, body: "too large", headers: { content_length: 1.gigabyte, content_type: "text/html" })
 
-    assert_nil @fetch.fetch_document(@url)
+    assert_nil @fetch.fetch_document(@url, ip: "1.2.3.4")
   end
 
   test "#fetch_document ignores large responses that were missing their content length" do
     WebMock.stub_request(:get, "https://www.example.com/")
       .to_return(status: 200, body: large_body_content, headers: { content_type: "text/html" })
 
-    assert_nil @fetch.fetch_document(@url)
+    assert_nil @fetch.fetch_document(@url, ip: "1.2.3.4")
   end
 
   test "#fetch_document ignores large responses that were lying about their content length" do
     WebMock.stub_request(:get, "https://www.example.com/")
       .to_return(status: 200, body: large_body_content, headers: { content_length: 1.megabyte, content_type: "text/html" })
 
-    assert_nil @fetch.fetch_document(@url)
+    assert_nil @fetch.fetch_document(@url, ip: "1.2.3.4")
   end
 
   test "fetch content type" do
     WebMock.stub_request(:head, "https://example.com/image.png").to_return(status: 200, headers: { content_type: "image/png" })
 
     url = URI.parse("https://example.com/image.png")
-    assert_equal "image/png", @fetch.fetch_content_type(url)
+    assert_equal "image/png", @fetch.fetch_content_type(url, ip: "1.2.3.4")
   end
 
   private

@@ -11,19 +11,27 @@ class Rooms::InvolvementsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "update involvement sends turbo update when becoming visible and when going invisible" do
-    assert_turbo_stream_broadcasts [ users(:david), :rooms ], count: 1 do
-    assert_changes -> { memberships(:david_watercooler).reload.involvement }, from: "everything", to: "invisible" do
-      put room_involvement_url(rooms(:watercooler)), params: { involvement: "invisible" }
-      assert_redirected_to room_involvement_url(rooms(:watercooler))
-    end
+    broadcasts = capture_turbo_stream_broadcasts([ users(:david), :rooms ]) do
+      assert_changes -> { memberships(:david_watercooler).reload.involvement }, from: "everything", to: "invisible" do
+        put room_involvement_url(rooms(:watercooler)), params: { involvement: "invisible" }
+        assert_redirected_to room_involvement_url(rooms(:watercooler))
+      end
     end
 
-    assert_turbo_stream_broadcasts [ users(:david), :rooms ], count: 2 do
-    assert_changes -> { memberships(:david_watercooler).reload.involvement }, from: "invisible", to: "everything" do
-      put room_involvement_url(rooms(:watercooler)), params: { involvement: "everything" }
-      assert_redirected_to room_involvement_url(rooms(:watercooler))
+    assert_equal 1, broadcasts.count
+    assert_equal "remove", broadcasts.first["action"]
+    assert_equal ActionView::RecordIdentifier.dom_id(rooms(:watercooler), :list), broadcasts.first["target"]
+
+    broadcasts = capture_turbo_stream_broadcasts([ users(:david), :rooms ]) do
+      assert_changes -> { memberships(:david_watercooler).reload.involvement }, from: "invisible", to: "everything" do
+        put room_involvement_url(rooms(:watercooler)), params: { involvement: "everything" }
+        assert_redirected_to room_involvement_url(rooms(:watercooler))
+      end
     end
-    end
+
+    assert_equal 1, broadcasts.count
+    assert_equal "prepend", broadcasts.first["action"]
+    assert_equal "shared_rooms", broadcasts.first["target"]
   end
 
   test "updating involvement does not send turbo update changing visible states" do
